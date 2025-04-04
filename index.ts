@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js"
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 import { zodToJsonSchema } from "zod-to-json-schema"
 import fetch from "node-fetch"
@@ -343,127 +342,134 @@ async function fetchUrl(
 	}
 }
 
-// Server setup
-const server = new Server(
-	{
-		name: "mcp-fetch",
-		version: "1.0.0",
-	},
-	{
-		capabilities: {
-			tools: {},
-		},
-	},
-)
+
 
 interface RequestHandlerExtra {
 	signal: AbortSignal
 }
 
-server.setRequestHandler(
-	ListToolsSchema,
-	async (request: { method: "tools/list" }, extra: RequestHandlerExtra) => {
-		const tools = [
-			{
-				name: "fetch",
-				description:
-					"Retrieves URLs from the Internet and extracts their content as markdown. If images are found, they are merged vertically (max 6 images per group, max height 8000px, max size 30MB per group) and copied to the clipboard of the user's host machine. You will need to paste (Cmd+V) to insert the images.",
-				inputSchema: zodToJsonSchema(FetchArgsSchema),
-			},
-		]
-		return { tools }
-	},
-)
 
-server.setRequestHandler(
-	CallToolSchema,
-	async (
-		request: {
-			method: "tools/call"
-			params: { name: string; arguments?: Record<string, unknown> }
-		},
-		extra: RequestHandlerExtra,
-	) => {
-		try {
-			const { name, arguments: args } = request.params
-
-			if (name !== "fetch") {
-				throw new Error(`Unknown tool: ${name}`)
-			}
-
-			const parsed = FetchArgsSchema.safeParse(args)
-			if (!parsed.success) {
-				throw new Error(`Invalid arguments: ${parsed.error}`)
-			}
-
-			const { content, prefix, imageUrls } = await fetchUrl(
-				parsed.data.url,
-				DEFAULT_USER_AGENT_AUTONOMOUS,
-				parsed.data.raw,
-			)
-
-			let finalContent = content
-			if (finalContent.length > parsed.data.maxLength) {
-				finalContent = finalContent.slice(
-					parsed.data.startIndex,
-					parsed.data.startIndex + parsed.data.maxLength,
-				)
-				finalContent += `\n\n<e>Content truncated. Call the fetch tool with a start_index of ${
-					parsed.data.startIndex + parsed.data.maxLength
-				} to get more content.</e>`
-			}
-
-			let imagesSection = ""
-			if (imageUrls && imageUrls.length > 0) {
-				imagesSection =
-					"\n\nImages found in article:\n" +
-					imageUrls.map((url) => `- ${url}`).join("\n")
-			}
-
-			return {
-				content: [
-					{
-						type: "text",
-						text: `${prefix}Contents of ${parsed.data.url}:\n${finalContent}${imagesSection}`,
-					},
-				],
-			}
-		} catch (error) {
-			return {
-				content: [
-					{
-						type: "text",
-						text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-					},
-				],
-				isError: true,
-			}
-		}
-	},
-)
-
-// Start server
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express from "express";
 const app = express();
-
-let transport: SSEServerTransport;
+let servers: Server[] = [];
 
 app.get("/sse", (req, res) => {
-  console.log("Received connection");
-  transport = new SSEServerTransport("/messages", res);
-  server.connect(transport);
+  	console.log("Received connection");
+  	const transport = new SSEServerTransport("/message", res);
+
+	// Server setup
+	const server = new Server(
+		{
+			name: "mcp-fetch",
+			version: "1.0.0",
+		},
+		{
+			capabilities: {
+				tools: {},
+			},
+		},
+	)
+
+	server.setRequestHandler(
+		ListToolsSchema,
+		async (request: { method: "tools/list" }, extra: RequestHandlerExtra) => {
+			const tools = [
+				{
+					name: "fetch",
+					description:
+						"Retrieves URLs from the Internet and extracts their content as markdown. If images are found, they are merged vertically (max 6 images per group, max height 8000px, max size 30MB per group) and copied to the clipboard of the user's host machine. You will need to paste (Cmd+V) to insert the images.",
+					inputSchema: zodToJsonSchema(FetchArgsSchema),
+				},
+			]
+			return { tools }
+		},
+	)
+
+	server.setRequestHandler(
+		CallToolSchema,
+		async (
+			request: {
+				method: "tools/call"
+				params: { name: string; arguments?: Record<string, unknown> }
+			},
+			extra: RequestHandlerExtra,
+		) => {
+			try {
+				const { name, arguments: args } = request.params
+
+				if (name !== "fetch") {
+					throw new Error(`Unknown tool: ${name}`)
+				}
+
+				const parsed = FetchArgsSchema.safeParse(args)
+				if (!parsed.success) {
+					throw new Error(`Invalid arguments: ${parsed.error}`)
+				}
+
+				const { content, prefix, imageUrls } = await fetchUrl(
+					parsed.data.url,
+					DEFAULT_USER_AGENT_AUTONOMOUS,
+					parsed.data.raw,
+				)
+
+				let finalContent = content
+				if (finalContent.length > parsed.data.maxLength) {
+					finalContent = finalContent.slice(
+						parsed.data.startIndex,
+						parsed.data.startIndex + parsed.data.maxLength,
+					)
+					finalContent += `\n\n<e>Content truncated. Call the fetch tool with a start_index of ${
+						parsed.data.startIndex + parsed.data.maxLength
+					} to get more content.</e>`
+				}
+
+				let imagesSection = ""
+				if (imageUrls && imageUrls.length > 0) {
+					imagesSection =
+						"\n\nImages found in article:\n" +
+						imageUrls.map((url) => `- ${url}`).join("\n")
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `${prefix}Contents of ${parsed.data.url}:\n${finalContent}${imagesSection}`,
+						},
+					],
+				}
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+						},
+					],
+					isError: true,
+				}
+			}
+		},
+	)
+    server.connect(transport);
+	servers.push(server);
 });
 
-app.post("/messages", (req, res) => {
-  console.log("Received message handle message");
-  if (transport) {
-    transport.handlePostMessage(req, res);
+app.post("/message", (req, res) => {
+  const sessionId = req.query.sessionId as string;
+  console.log(`Received message handle message: sessionId=${sessionId}`);
+  const transport = servers
+    .map((s) => s.transport as SSEServerTransport)
+    .find((t) => t.sessionId === sessionId);
+  if (!transport) {
+    res.status(404).send("Session not found");
+    return;
   }
+  transport.handlePostMessage(req, res);
 });
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
-
