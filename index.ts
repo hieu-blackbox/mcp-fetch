@@ -443,12 +443,27 @@ server.setRequestHandler(
 )
 
 // Start server
-async function runServer() {
-	const transport = new StdioServerTransport()
-	await server.connect(transport)
-}
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import express from "express";
+const app = express();
 
-runServer().catch((error) => {
-	process.stderr.write(`Fatal error running server: ${error}\n`)
-	process.exit(1)
-})
+let transport: SSEServerTransport;
+
+app.get("/sse", (req, res) => {
+  console.log("Received connection");
+  transport = new SSEServerTransport("/messages", res);
+  server.connect(transport);
+});
+
+app.post("/messages", (req, res) => {
+  console.log("Received message handle message");
+  if (transport) {
+    transport.handlePostMessage(req, res);
+  }
+});
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
+
